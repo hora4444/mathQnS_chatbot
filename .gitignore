@@ -1,0 +1,17 @@
+data_pipeline/data/
+data_pipeline/output/
+data_pipeline/data분할용/
+data_pipeline/복구용폴더/
+.venv/
+.env
+db
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+db.sqlite3
+*.log
+.vscode/
+.idea/

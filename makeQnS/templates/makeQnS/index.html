@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Math AI - 수학 문제 생성, 해설</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <style>
+        .chat-scroll { scroll-behavior: smooth; }
+        /* LaTeX 렌더링 시 발생하는 줄바꿈 방지 */
+        .mjx-chtml { white-space: normal !important; }
+        .chat-message {
+            line-height: 1.8; /* 줄 간격을 넓혀 수식이 겹치지 않게 함 */
+            max-width: 100%; /* 부모 너비를 넘지 않게 */
+            overflow-x: auto; /* 내용이 길면 가로 스크롤 생성 */
+            padding: 15px;
+            word-break: break-word; /* 텍스트 줄바꿈 */
+        }
+        mjx-container {
+            margin: 5px 0; /* 수식 위아래 여백 추가 */
+            max-width: 100% !important;
+            overflow-x: auto !important;
+            overflow-y: hidden !important;
+        }
+
+        .ai-message {
+            min-width: 150px; /* 너무 작게 쪼그라드는 것 방지 */
+            min-height: 50px; 
+            padding: 10px;
+            margin: 5px;
+            display: inline-block; /* 내용에 맞춰 늘어나되 최소폭 유지 */
+        }
+
+        .loading-dots::after {
+            content: '...';
+            animation: dots 1.5s steps(5, end) infinite;
+        }
+
+        @keyframes dots {
+            0%, 20% { content: '.'; }
+            40% { content: '..'; }
+            60% { content: '...'; }
+            80%, 100% { content: ''; }
+        }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/markdown-it/dist/markdown-it.min.js"></script>
+</head>
+<body class="bg-gray-50 h-screen flex flex-col">
+
+    <header class="bg-white border-b p-4 shadow-sm">
+        <h1 class="text-xl font-bold text-blue-600 text-center">📐 Math AI 문제 풀이 서비스</h1>
+    </header>
+
+    <main id="chat-window" class="flex-1 overflow-y-auto p-4 space-y-4 chat-scroll">
+        <div class="max-w-3xl mx-auto space-y-4">
+            <div class="bg-blue-50 p-4 rounded-lg border border-blue-100 text-blue-800 text-sm">
+                <div>반갑습니다! 궁금한 수학 문제를 입력해 주세요. 챗봇이 실시간으로 답변을 생성합니다.</div>
+                <div>- 아직 개발단계로 고1 모의고사들의 문제들로 작성되었습니다.</div>
+                <div>- 무료서버라 ai성능이 낮아 원하는 답변이 나오지 않을 수 있습니다.</div>
+            </div>
+        </div>
+    </main>
+
+    <footer class="p-4 bg-white border-t">
+        <div class="max-w-3xl mx-auto flex gap-2">
+            <input type="text" id="user-input" 
+                class="flex-1 border border-gray-300 rounded-full px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                placeholder="문제를 입력하세요... (예: 복소수 z^2이 실수가 되는 조건)">
+            <button onclick="sendQuestion()" id="send-btn"
+                    class="bg-blue-600 text-white rounded-full px-6 py-2 font-bold hover:bg-blue-700 transition">
+                전송
+            </button>
+        </div>
+    </footer>
+
+    <script>
+        const chatWindow = document.getElementById('chat-window').firstElementChild;
+        const userInput = document.getElementById('user-input');
+        const sendBtn = document.getElementById('send-btn');
+
+        // 메시지 추가 함수
+        function addMessage(text, isUser = false) {
+            const wrapper = document.createElement('div');
+            wrapper.className = isUser ? "flex justify-end" : "flex justify-start";
+            
+            const msgDiv = document.createElement('div');
+            msgDiv.className = isUser 
+                ? "bg-blue-600 text-white px-4 py-2 rounded-2xl max-w-[80%]" 
+                : "bg-white border border-gray-200 px-4 py-2 rounded-2xl max-w-[80%] shadow-sm whitespace-pre-wrap";
+            
+            msgDiv.innerText = text;
+            wrapper.appendChild(msgDiv);
+            chatWindow.appendChild(wrapper);
+            
+            // 자동 스크롤
+            document.getElementById('chat-window').scrollTop = document.getElementById('chat-window').scrollHeight;
+            return msgDiv;
+        }
+
+        function debounce(func, timeout = 300) {
+            let timer;
+            return (...args) => {
+                clearTimeout(timer);
+                timer = setTimeout(() => { func.apply(this, args); }, timeout);
+            };
+        }
+
+        // 2. MathJax 렌더링 함수를 디바운스로 감싸기
+        const renderMath = debounce((element) => {
+            if (window.MathJax && window.MathJax.typesetPromise) {
+                console.log("수식 렌더링 시도 중..."); // 디버깅용 로그
+                MathJax.typesetPromise([element])
+                    .then(() => {
+                        console.log("수식 렌더링 완료!");
+                    })
+                    .catch((err) => console.log('MathJax 에러:', err));
+            }
+        }, 300);
+
+        async function sendQuestion() {
+            const question = userInput.value.trim();
+            if (!question) return;
+
+            const md = window.markdownit();
+            userInput.value = "";
+
+            // 1. 사용자 질문 표시
+            addMessage(question, true);
+
+            // 2. AI 답변용 초기 말풍선 생성 및 변수 설정
+            let currentAiMsgDiv = addMessage("문제를 생성하기 위해 데이터를 분석하고 있습니다");
+            currentAiMsgDiv.innerHTML += '<span class="loading-dots"></span>';
+            let accumulatedText = "";
+            let isFirstChunk = true;
+
+            try {
+                const response = await fetch(`/chat-stream/?q=${encodeURIComponent(question)}`);
+                
+                if (!response.ok) {
+                    throw new Error(`서버 응답 에러: ${response.status}`);
+                }
+                
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) {
+                        // 스트리밍이 완전히 끝나면 마지막으로 한 번 더 렌더링
+                        if (window.MathJax) {
+                            MathJax.typesetPromise([currentAiMsgDiv]);
+                        }
+                        break;
+                    }
+
+                    const chunk = decoder.decode(value);
+                    const lines = chunk.split('\n');
+                    
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            try {
+                                const jsonStr = line.substring(6).trim();
+                                if (!jsonStr) continue;
+
+                                const data = JSON.parse(jsonStr);
+                                const newContent = data.content;
+
+                                // 첫 실제 텍스트 수신 시 "분석 중..." 제거
+                                if (isFirstChunk && newContent.trim().length > 0) {
+                                    currentAiMsgDiv.innerHTML = ""; 
+                                    isFirstChunk = false;
+                                }
+
+                                // [재검토 감지] 기존 내용이 100자 이상인데 ### 등이 나오면 블록 분리
+                                if ((newContent.includes("###") && !newContent.includes("리포트")) || newContent.includes("제시된")) {
+                                    if (accumulatedText.length > 100) {
+                                        currentAiMsgDiv.style.opacity = "0.7"; 
+                                        currentAiMsgDiv.innerHTML += "<hr><p style='font-size:0.8em; color:gray;'>▲ 이전 풀이 시도 (재검토 중...)</p>";
+                                        
+                                        // 새 메시지 블록 생성 (기존 addMessage 활용이 안전)
+                                        currentAiMsgDiv = addMessage(""); 
+                                        accumulatedText = ""; 
+                                        console.log("재검토 감지: 새 답변 블록 생성");
+                                    }
+                                }
+
+                                accumulatedText += newContent;
+                                
+                                if (accumulatedText.length > 0) {
+                                    currentAiMsgDiv.innerHTML = md.render(accumulatedText);
+
+                                    if (!isFirstChunk) {
+                                        renderMath(currentAiMsgDiv);
+                                    }
+                                }
+                            } catch (e) {
+                                console.log("JSON 파싱 에러:", e);
+                            }
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error("실제 에러 감지됨:", error);
+                
+                if (currentAiMsgDiv) {
+                    currentAiMsgDiv.innerHTML = `
+                        <div style="
+                        display: flex; 
+                        flex-direction: column; 
+                        align-items: center; 
+                        justify-content: center; 
+                        padding: 20px; 
+                        min-width: 250px;
+                        text-align: center;
+                        line-height: 1.6;">
+                            <div style="font-size: 1.8rem; margin-bottom: 12px;">⚠️</div>
+                            <div style="
+                            color: #d32f2f; 
+                            font-weight: bold; 
+                            font-size: 1.1rem; 
+                            margin-bottom: 8px;
+                            word-break:keep-all">연결에 오류가 발생했습니다
+                            </div>
+                            <div style="
+                            font-size: 0.85em; 
+                            color: #666; 
+                            word-break: keep-all;
+                            line-height: 1.5;">서버가 재시작 중이거나 응답이 지연되고 있습니다.<br>
+잠시 후 다시 전송 버튼을 눌러주세요.</div>
+                        </div>
+                    `;
+                    currentAiMsgDiv.style.width = "100%";
+                    currentAiMsgDiv.style.backgroundColor = "#fff5f5";
+                    currentAiMsgDiv.style.border = "1px solid #feb2b2";
+                    currentAiMsgDiv.style.borderRadius = "16px";
+                    currentAiMsgDiv.style.boxShadow = "0 2px 4px rgba(0,0,0,0.05)";
+                }
+            }
+        }
+        // 엔터키 지원
+        userInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendQuestion();
+        });
+    </script>
+</body>
+</html>
