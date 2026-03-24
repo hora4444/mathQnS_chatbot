@@ -15,3 +15,4 @@ db.sqlite3
 *.log
 .vscode/
 .idea/
+oracle_math_chatbot_key/

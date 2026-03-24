@@ -19,12 +19,13 @@ from langchain_ollama import OllamaEmbeddings, ChatOllama
 
 from django.conf import settings
 
-FAISS_INSWX_PATH=os.path.join(settings.BASE_DIR, "daiss_db/math_index.faiss")
+FAISS_INSWX_PATH=os.path.join(settings.BASE_DIR, "faiss_db/math_index.faiss")
 CONTENT_PKL_PATH=os.path.join(settings.BASE_DIR, "faiss_db/math_content.pkl")
 
 
 # 1. 초기 로드 및 데이터 준비
 EMBEDDINGS = OllamaEmbeddings(model="nomic-embed-text")
+_rag_chain = None
 
 # LLM설정
 llm = ChatOllama(
@@ -95,13 +96,6 @@ def load_custom_faiss():
     vectorstore = FAISS.from_documents(docs, EMBEDDINGS)
     return vectorstore, docs
 
-vectorstore, all_docs = load_custom_faiss()
-
-# 2. 개별 리트리버 설정
-faiss_retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
-bm25_retriever = BM25Retriever.from_documents(all_docs)
-bm25_retriever.k = 3
-
 # 3. 앙상블 로직 (Runnable용 함수)
 def merge_documents(data: dict):
     """FAISS와 BM25 결과를 합치고 중복을 제거함"""
@@ -119,12 +113,6 @@ def merge_documents(data: dict):
             seen_ids.add(doc_id)
     return unique_docs[:5] # 최종 TOP 5 반환
 
-# 4. LCEL 체인 구성 (앙상블 리트리버)
-ensemble_retriever = RunnableParallel(
-    faiss=faiss_retriever,
-    bm25=bm25_retriever
-) | RunnableLambda(merge_documents)
-
 def format_docs(docs):
     formatted = []
     for i, doc in enumerate(docs):
@@ -133,23 +121,47 @@ def format_docs(docs):
         formatted.append(content)
     return "\n\n".join(formatted)
 
-# 최종 RAG 체인 구성 (LCEL)
-rag_chain = (
-    {
-        "context": ensemble_retriever | format_docs, 
-        "question": RunnablePassthrough()
-    }
-    | prompt
-    | llm
-    | StrOutputParser()
-)
+def get_rag_chain():
+    """필요한 시점에 로딩하여 RAG 체인을 반환하는 함수"""
+    global _rag_chain
+    
+    if _rag_chain is None:
+        print("\n[시스템] RAG 리소스 로딩을 시작합니다. (최초 1회 실행)")
+        
+        # 1. 데이터 로드
+        vectorstore, all_docs = load_custom_faiss()
+        
+        # 2. 리트리버 설정
+        faiss_retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
+        bm25_retriever = BM25Retriever.from_documents(all_docs)
+        bm25_retriever.k = 3
+        
+        # 3. 앙상블 리트리버 구성
+        ensemble_retriever = RunnableParallel(
+            faiss=faiss_retriever,
+            bm25=bm25_retriever
+        ) | RunnableLambda(merge_documents)
+        
+        # 4. 최종 체인 구성
+        _rag_chain = (
+            {
+                "context": ensemble_retriever | format_docs, 
+                "question": RunnablePassthrough()
+            }
+            | prompt
+            | llm
+            | StrOutputParser()
+        )
+        print("[시스템] RAG 리소스 로딩 완료!\n")
+        
+    return _rag_chain
 
 if __name__ == "__main__":
-    # 실제 DB에 있을 법한 질문으로 테스트
     test_query = "복소수 z에 대하여 z^2이 실수가 되도록 하는 값을 구하는 문제 찾아줘"
     print(f"질문: {test_query}\n")
     print("--- 답변 생성 중 ---")
     
-    # 9B 모델의 응답을 실시간으로 확인하기 위해 스트리밍 사용
-    for chunk in rag_chain.stream(test_query):
+    # 이제 전역 변수가 아닌 함수를 호출하여 체인을 가져옵니다.
+    chain = get_rag_chain()
+    for chunk in chain.stream(test_query):
         print(chunk, end="", flush=True)

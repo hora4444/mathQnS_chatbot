@@ -2,7 +2,7 @@ from django.shortcuts import render
 
 # Create your views here.
 from django.http import StreamingHttpResponse
-from .rag_service import EMBEDDINGS, rag_chain
+from .rag_service import EMBEDDINGS, get_rag_chain
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
 import json
@@ -39,6 +39,8 @@ def chat_stream(request):
         else:
             # 새로운 주제라면 바로 질문함
             contextual_question = user_question
+        
+        rag_chain = get_rag_chain()
 
         for chunk in rag_chain.stream(contextual_question):
             # chunk가 객체인 경우 content 속성만 추출, 문자열인 경우 그대로 사용
