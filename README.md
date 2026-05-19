@@ -19,7 +19,7 @@ RAG 검색과 LLM 응답을 활용하여
 - OCR 기반 텍스트 추출
 - 벡터 검색 + BM25 하이브리드 검색
 - 자연어 기반 문제 질의응답
-- Django 웹 서비스 배포(140.245.69.100:8000)
+- Django 웹 서비스 배포(http://140.245.69.100:8000)
 
 ## System Architecture
 PDF → OCR → JSONL → Embedding → Faiss/BM25 → RAG → LLM Response
